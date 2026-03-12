@@ -325,15 +325,21 @@ func (c *Client) tlsHandshakeWithTimeout(tlsConn *tls.Conn, ctx context.Context)
 	errChan := make(chan error, 1)
 	defer close(errChan)
 
+	// Run handshake in goroutine to prevent blocking on hung connections
+	go func() {
+		err := tlsConn.Handshake()
+		if err == tls.ErrCertsOnly {
+			err = nil
+		}
+		errChan <- err
+	}()
+
 	select {
 	case <-ctx.Done():
+		// Close underlying connection to force handshake goroutine to exit
+		_ = tlsConn.Close()
 		return errorutil.NewWithTag("ztls", "timeout while attempting handshake") //nolint
-	case errChan <- tlsConn.Handshake():
+	case err := <-errChan:
+		return err
 	}
-
-	err := <-errChan
-	if err == tls.ErrCertsOnly {
-		err = nil
-	}
-	return err
 }
