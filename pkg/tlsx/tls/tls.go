@@ -226,21 +226,33 @@ func (c *Client) EnumerateCiphers(hostname, ip, port string, options clients.Con
 	}()
 
 	for _, v := range toEnumerate {
-		// create new baseConn and pass it to tlsclient
-		baseConn, err := pool.Acquire(context.Background())
-		if err != nil {
-			return enumeratedCiphers, errorutil.NewWithErr(err).WithTag("ctls") //nolint
-		}
-		stats.IncrementCryptoTLSConnections()
-		baseCfg.CipherSuites = []uint16{tlsCiphers[v]}
+		func() {
+			// create new baseConn and pass it to tlsclient
+			baseConn, err := pool.Acquire(context.Background())
+			if err != nil {
+				return
+			}
+			defer func() {
+				_ = baseConn.Close()
+			}()
+			stats.IncrementCryptoTLSConnections()
+			baseCfg.CipherSuites = []uint16{tlsCiphers[v]}
 
-		conn := tls.Client(baseConn, baseCfg)
+			conn := tls.Client(baseConn, baseCfg)
 
-		if err := conn.Handshake(); err == nil {
-			ciphersuite := conn.ConnectionState().CipherSuite
-			enumeratedCiphers = append(enumeratedCiphers, tls.CipherSuiteName(ciphersuite))
-		}
-		_ = conn.Close() // close baseConn internally
+			ctx := context.Background()
+			if c.options.Timeout != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(c.options.Timeout)*time.Second)
+				defer cancel()
+			}
+
+			if err := conn.HandshakeContext(ctx); err == nil {
+				ciphersuite := conn.ConnectionState().CipherSuite
+				enumeratedCiphers = append(enumeratedCiphers, tls.CipherSuiteName(ciphersuite))
+			}
+			_ = conn.Close() // close baseConn internally
+		}()
 	}
 	return enumeratedCiphers, nil
 }

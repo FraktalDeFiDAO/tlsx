@@ -99,6 +99,7 @@ func TestClientCertRequired(t *testing.T) {
 			resp, err := client.ConnectWithOptions(host, host, parsedUrl.Port(), connectOpts)
 			if err != nil {
 				t.Errorf("client ConnectWithOptions call failed: %s", err)
+				return
 			}
 
 			actualResult := resp.ClientCertRequired

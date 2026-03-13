@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,7 @@ type UploadWriter struct {
 	client         *retryablehttp.Client
 	done           chan struct{}
 	data           chan *clients.Response
+	mu             sync.RWMutex
 	assetGroupID   string
 	assetGroupName string
 	counter        atomic.Int32
@@ -100,17 +102,23 @@ func (u *UploadWriter) SetAssetID(id string) error {
 	if !xidRegex.MatchString(id) {
 		gologger.Warning().Msgf("invalid asset id provided (unknown xid format): %s", id)
 	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.assetGroupID = id
 	return nil
 }
 
 // SetAssetGroupName sets the scan name for the upload writer
 func (u *UploadWriter) SetAssetGroupName(name string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.assetGroupName = name
 }
 
 // SetTeamID sets the team id for the upload writer
 func (u *UploadWriter) SetTeamID(id string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.TeamID = id
 }
 
@@ -212,8 +220,12 @@ func (u *UploadWriter) upload(data []byte) error {
 	if err := json.Unmarshal(bin, &uploadResp); err != nil {
 		return errkit.Wrapf(err, "could not unmarshal response got %v", string(bin))
 	}
-	if uploadResp.ID != "" && u.assetGroupID == "" {
-		u.assetGroupID = uploadResp.ID
+	if uploadResp.ID != "" {
+		u.mu.Lock()
+		if u.assetGroupID == "" {
+			u.assetGroupID = uploadResp.ID
+		}
+		u.mu.Unlock()
 	}
 	return nil
 }
@@ -224,12 +236,18 @@ func (u *UploadWriter) upload(data []byte) error {
 func (u *UploadWriter) getRequest(bin []byte) (*retryablehttp.Request, error) {
 	var method, url string
 
-	if u.assetGroupID == "" {
+	u.mu.RLock()
+	assetID := u.assetGroupID
+	assetName := u.assetGroupName
+	teamID := u.TeamID
+	u.mu.RUnlock()
+
+	if assetID == "" {
 		u.uploadURL.Path = uploadEndpoint
 		method = http.MethodPost
 		url = u.uploadURL.String()
 	} else {
-		u.uploadURL.Path = fmt.Sprintf(appendEndpoint, u.assetGroupID)
+		u.uploadURL.Path = fmt.Sprintf(appendEndpoint, assetID)
 		method = http.MethodPatch
 		url = u.uploadURL.String()
 	}
@@ -240,14 +258,14 @@ func (u *UploadWriter) getRequest(bin []byte) (*retryablehttp.Request, error) {
 	// add pdtm meta params - version will be set by updateutils
 	req.Params.Merge(updateutils.GetpdtmParams("tlsx"))
 	// if it is upload endpoint also include name if it exists
-	if u.assetGroupName != "" && req.Path == uploadEndpoint {
-		req.Params.Add("name", u.assetGroupName)
+	if assetName != "" && req.Path == uploadEndpoint {
+		req.Params.Add("name", assetName)
 	}
 	req.Update()
 
 	req.Header.Set(pdcpauth.ApiKeyHeaderName, u.creds.APIKey)
-	if u.TeamID != "" {
-		req.Header.Set(teamIDHeader, u.TeamID)
+	if teamID != "" {
+		req.Header.Set(teamIDHeader, teamID)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Accept", "application/json")
