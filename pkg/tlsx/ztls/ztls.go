@@ -258,8 +258,9 @@ func (c *Client) EnumerateCiphers(hostname, ip, port string, options clients.Con
 				_ = baseConn.Close()
 			}()
 			stats.IncrementZcryptoTLSConnections()
-			conn := tls.Client(baseConn, baseCfg)
-			baseCfg.CipherSuites = []uint16{ztlsCiphers[v]}
+			cfg := baseCfg.Clone()
+			cfg.CipherSuites = []uint16{ztlsCiphers[v]}
+			conn := tls.Client(baseConn, cfg)
 
 			ctx := context.Background()
 			if c.options.Timeout != 0 {

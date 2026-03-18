@@ -128,10 +128,14 @@ func (u *UploadWriter) autoCommit(ctx context.Context) {
 		u.done <- struct{}{}
 		close(u.done)
 		// if no scanid is generated no results were uploaded
-		if u.assetGroupID == "" {
+		u.mu.RLock()
+		assetGroupID := u.assetGroupID
+		teamID := u.TeamID
+		u.mu.RUnlock()
+		if assetGroupID == "" {
 			gologger.Verbose().Msgf("UI dashboard setup skipped, no results found to upload")
 		} else {
-			gologger.Info().Msgf("Found %v results, View found results in dashboard : %v", u.counter.Load(), getAssetsDashBoardURL(u.assetGroupID, u.TeamID))
+			gologger.Info().Msgf("Found %v results, View found results in dashboard : %v", u.counter.Load(), getAssetsDashBoardURL(assetGroupID, teamID))
 		}
 	}()
 	// temporary buffer to store the results
@@ -193,7 +197,11 @@ func (u *UploadWriter) uploadChunk(buff *bytes.Buffer) error {
 	// if successful, reset the buffer
 	buff.Reset()
 	// log in verbose mode
-	gologger.Warning().Msgf("Uploaded results chunk, you can view assets at %v", getAssetsDashBoardURL(u.assetGroupID, u.TeamID))
+	u.mu.RLock()
+	assetGroupID := u.assetGroupID
+	teamID := u.TeamID
+	u.mu.RUnlock()
+	gologger.Warning().Msgf("Uploaded results chunk, you can view assets at %v", getAssetsDashBoardURL(assetGroupID, teamID))
 	return nil
 }
 
